@@ -5,11 +5,11 @@ import sys
 import zipfile
 import requests
 
-
+# Variable Declaration
 owner_name = "GitHub Account Name"
 repo_name = "GitHub Repo Name"
-application_name = "application.exe"
-updater_name = "updater.exe"
+application_name = "Main Application Name"
+updater_name = "Updater Application Name"
 
 
 # Function to get the latest version tag from GitHub API
@@ -17,7 +17,9 @@ def get_latest_version(latest_version_url):
     response = requests.get(latest_version_url)
     response.raise_for_status()
     latest_release = response.json()
-    return latest_release['tag_name'].strip()  # Trim any extra spaces
+    latest_version = latest_release['tag_name'].strip()
+    description = latest_release.get('body', 'No description available.')
+    return latest_version, description
 
 
 # Function to download the update zip file
@@ -100,17 +102,17 @@ def main():
         # Get the current and latest version
         current_version_raw = subprocess.run([app_exe_path, "--version"], capture_output=True, text=True).stdout.strip()
         current_version = normalize_version(current_version_raw)
-        latest_version_raw = get_latest_version(latest_version_url)
+        latest_version_raw, description = get_latest_version(latest_version_url)
         latest_version = normalize_version(latest_version_raw)
 
         if current_version != latest_version:
-            if specific_input(f"Update v{latest_version} is available, would you like to update? (y/n): ",
-                              ["y", "Y", "n", "N"]).lower() == "y":
+            print(f"Update v{latest_version} is now available!")
+            print(f"Changelog: \n {description}")
+            if specific_input(f"Would you like to update? (y/n): ", ["y", "Y", "n", "N"]).lower() == "y":
                 print("Starting Update...")
                 # Find the download URL for the zip asset from the latest release
                 response = requests.get(latest_version_url)
                 latest_release = response.json()
-                # Example of finding the zip file in assets
                 target_asset_name = f"v{latest_version_raw}.zip"
                 download_url = None
                 for asset in latest_release['assets']:
@@ -119,20 +121,34 @@ def main():
                         break
                 if not download_url:
                     raise Exception(f"Launcher could not find zip file for version {latest_version}")
+
                 # Download the zip file
                 zip_file_path = os.path.join(app_dir, target_asset_name)
                 download_update_zip(download_url, zip_file_path)
+
                 # Extract to a versioned folder
                 extract_to = os.path.join(app_dir, f"update_{latest_version_raw}")
                 extract_zip(zip_file_path, extract_to)
-                # print(f"LAUNCHER: Extracted update to {extract_to}")
+
                 # Replace Updater
                 new_updater_path = os.path.join(extract_to, updater_name)
                 shutil.copy(new_updater_path, updater_path)
-                # print("LAUNCHER: GF_Updater.exe replaced.")
-                # Close Launcher and start Updater to handle the rest
-                # print("LAUNCHER: Starting GF_Updater...")
-                subprocess.Popen([updater_path, extract_to])
+
+                # Start the updater and wait for the result
+                result = subprocess.run([updater_path, extract_to])
+
+                # Check the updater's exit code
+                if result.returncode == 0:
+                    print("Update completed successfully!")
+                elif result.returncode == 2:
+                    print(
+                        "Update failed due to file syncing issues. "
+                        "Please restart the application and try updating again.")
+                else:
+                    print("Update failed due to an error.")
+                    sys.exit(1)
+
+                # Exit the launcher after updating
                 sys.exit(0)
             else:
                 print("Skipping update (not recommended)...")
